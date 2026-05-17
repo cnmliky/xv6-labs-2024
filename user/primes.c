@@ -1,85 +1,61 @@
 #include "kernel/types.h"
-#include "kernel/fcntl.h"
 #include "user/user.h"
 
-#define MAX_NUM 270
+// 屏蔽编译器的无限递归警告
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winfinite-recursion"
 
-void primes(int) __attribute__((noreturn));
+void run_sieve(int p[2]) {
+    int prime;
+    close(p[1]); // 关闭左侧写端
 
-void
-primes(int readDp)
-{
-  short prime;
-  if(read(readDp, &prime, 2) == 0){
-    close(readDp);
-    exit(0);
-  }
-  printf("prime %d\n", prime);
-
-  int right[2];
-  if(pipe(right) < 0){
-    fprintf(2, "pipe error\n");
-    exit(1);
-  }
-
-  short n;
-  while(read(readDp, &n, 2) > 0){
-    if(n % prime != 0)
-      write(right[1], &n, 2);
-  }
-    
-  close(readDp);
-  close(right[1]);
-
-  int pid = fork();
-
-  if(pid < 0){
-    fprintf(2, "fork error\n");
-    exit(1);
-  }
-
-  if(pid == 0){
-    primes(right[0]);
-    close(right[0]);
-  } else {
-    close(right[0]);
-    wait(0);
-  }
-  exit(0);
-}
-
-int
-main(int argc, char *argv[])
-{
-  int p[2];
-  if(pipe(p) < 0){
-    fprintf(2, "pipe error\n");
-    exit(1);
-  }
-
-  int pid = fork();
-
-  if(pid < 0){
-    fprintf(2, "fork error\n");
-    exit(1);
-  }
-
-  if(pid == 0){
-    close(p[1]);
-    primes(p[0]);
-  } else {
-    close(p[0]);
-    short n[MAX_NUM];
-    for(int i = 0; i < MAX_NUM; i++){
-      n[i] = i + 2;
-      if(write(p[1], &n[i], 2) < 0){
-        fprintf(2, "write error\n");
-        exit(1);
-      }
+    if (read(p[0], &prime, sizeof(int)) != sizeof(int)) {
+        close(p[0]);
+        exit(0);
     }
-    close(p[1]);
-    wait(0);
-  }
-  
-  exit(0);
+
+    printf("prime %d\n", prime);
+
+    int next_p[2];
+    if (pipe(next_p) < 0) {
+        fprintf(2, "pipe failed\n");
+        exit(1);
+    }
+
+    if (fork() == 0) {
+        // 【关键修复】：子进程不再需要左侧的读端了
+        close(p[0]); 
+        run_sieve(next_p);
+    } else {
+        close(next_p[0]); // 父进程不需要右侧读端
+        int n;
+        while (read(p[0], &n, sizeof(int)) == sizeof(int)) {
+            if (n % prime != 0) {
+                write(next_p[1], &n, sizeof(int));
+            }
+        }
+        close(p[0]);
+        close(next_p[1]);
+        wait(0);
+        exit(0);
+    }
+}
+#pragma GCC diagnostic pop
+
+int main(int argc, char *argv[]) {
+    int p[2];
+    pipe(p);
+
+    if (fork() == 0) {
+        run_sieve(p);
+    } else {
+        close(p[0]);
+        // 实验要求覆盖到 280
+        for (int i = 2; i <= 280; i++) {
+            write(p[1], &i, sizeof(int));
+        }
+        close(p[1]);
+        wait(0);
+    }
+    exit(0);
 }

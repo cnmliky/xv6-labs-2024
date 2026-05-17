@@ -1,0 +1,1 @@
+The user arguments are passed in RISC-V registers (a0-a5). When a system call occurs, the kernel retrieves these arguments from the trapframe of the process, which saves the state of user registers. Functions like argint() or argaddr() read these values from p->trapframe->a0, etc.

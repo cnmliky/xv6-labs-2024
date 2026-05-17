@@ -91,3 +91,20 @@ kalloc(void)
   return (void*)r;
 }
 
+uint64
+count_free_mem(void)
+{
+  struct run *r;
+  uint64 free_bytes = 0;
+
+  // 访问物理内存分配器的空闲链表时需要加锁，防止多核竞争
+  acquire(&kmem.lock);
+  r = kmem.freelist;
+  while(r){
+    free_bytes += PGSIZE;
+    r = r->next;
+  }
+  release(&kmem.lock);
+
+  return free_bytes;
+}

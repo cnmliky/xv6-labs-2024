@@ -449,3 +449,32 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+
+// --- 修正版：将声明放在函数上方 ---
+void vmprint_recursive(pagetable_t pagetable, int level);
+
+void vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  vmprint_recursive(pagetable, 2);
+}
+
+void vmprint_recursive(pagetable_t pagetable, int level) {
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      uint64 pa = PTE2PA(pte);
+      
+      // 格式化打印：使用 %lx 打印 uint64 类型
+      printf("..");
+      for(int j = 0; j < (2 - level); j++) printf(" ..");
+      printf("%d: pte %lx pa %lx\n", i, pte, pa);
+
+      // 如果当前是最高两层，且不是叶子节点，则递归
+      // 判断是否为叶子节点：如果 PTE_R/W/X 中有任意一位被设置，就是叶子
+      if(level > 0 && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        vmprint_recursive((pagetable_t)pa, level - 1);
+      }
+    }
+  }
+}

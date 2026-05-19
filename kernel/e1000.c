@@ -126,36 +126,27 @@ e1000_transmit(char *buf, int len)
   return 0;
 }
 
-static void
-e1000_recv(void)
+static void e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver a buf for each packet (using net_rx()).
-  //
-  uint32 rdt = regs[E1000_RDT];
-  uint32 i = (rdt + 1) % RX_RING_SIZE;
-  while(i != rdt){
-    if(rx_ring[i].status & E1000_RXD_STAT_DD){
-      // this descriptor is full
-      uint64 len = rx_ring[i].length;
-      net_rx(rx_bufs[i], len);
-      // free the buffer
-      rx_bufs[i] = kalloc();
-      if(rx_bufs[i] == 0)
-        return;
-      rx_ring[i].addr = (uint64) rx_bufs[i];
-      rx_ring[i].status = 0;
-      i = (i + 1) % RX_RING_SIZE;
-    } else {
-      // this descriptor is not full
-      break;
-    }
+  while(1){
+    uint32 rdt = regs[E1000_RDT];
+    uint32 i = (rdt + 1) % RX_RING_SIZE; // 获取下一个待处理索引
+
+    if(!(rx_ring[i].status & E1000_RXD_STAT_DD))
+      break; // 没有更多数据包
+
+    net_rx(rx_bufs[i], rx_ring[i].length);
+
+    // 重新填充缓冲区
+    rx_bufs[i] = kalloc();
+    if(rx_bufs[i] == 0) panic("e1000_recv: kalloc");
+    
+    rx_ring[i].addr = (uint64)rx_bufs[i];
+    rx_ring[i].status = 0; // 必须重置状态
+
+    // 关键：每成功回收一个描述符，就通知硬件
+    regs[E1000_RDT] = i; 
   }
-  regs[E1000_RDT] = (i - 1) % RX_RING_SIZE;
-  return;
 }
 
 void

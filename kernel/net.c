@@ -172,16 +172,34 @@ sys_bind(void)
 // release any resources previously created by bind(port);
 // from now on UDP packets addressed to port should be dropped.
 //
-uint64
-sys_unbind(void)
+uint64 sys_unbind(void)
 {
-  //
-  // Optional: Your code here.
-  //
-
-  return 0;
+  int port;
+  argint(0, &port);
+  acquire(&netlock);
+  struct bound_port *bp = bound_ports, *prev = 0;
+  while(bp){
+    if(bp->port == port){
+      // 从链表移除
+      if(prev) prev->next = bp->next; else bound_ports = bp->next;
+      
+      // 清理残留的包队列
+      struct packets_queue *pq = bp->h;
+      while(pq){
+        struct packets_queue *next = pq->next;
+        kfree(pq->buf); // 释放缓存的包内存
+        kfree(pq);      // 释放队列节点内存
+        pq = next;
+      }
+      kfree(bp); // 释放端口节点
+      release(&netlock);
+      return 0;
+    }
+    prev = bp; bp = bp->next;
+  }
+  release(&netlock);
+  return -1;
 }
-
 //
 // recv(int dport, int *src, short *sport, char *buf, int maxlen)
 // if there's a received UDP packet already queued that was
@@ -200,75 +218,48 @@ sys_unbind(void)
 uint64
 sys_recv(void)
 {
-  //
-  // Your code here.
-  //
   struct proc *p = myproc();
-  int dport;
-  uint64 src;
-  uint64 sport;
-  uint64 bufaddr;
-  int maxlen;
+  int dport, maxlen;
+  uint64 src, sport, bufaddr;
 
-  argint(0, &dport);
-  argaddr(1, &src);
-  argaddr(2, &sport);
-  argaddr(3, &bufaddr);
-  argint(4, &maxlen);
+  argint(0, &dport); argaddr(1, &src); argaddr(2, &sport); 
+  argaddr(3, &bufaddr); argint(4, &maxlen);
 
   acquire(&netlock);
   struct bound_port *bp = find_bound_port(dport);
-  if(bp == 0){
-    release(&netlock);
-    printf("recv: no process bound to port\n");
-    return -1;
-  }
+  if(bp == 0){ release(&netlock); return -1; }
 
   while(bp->h == 0){
-    if(killed(p)){
-      release(&netlock);
-      return -1;
-    }
+    if(killed(p)){ release(&netlock); return -1; }
     sleep(bp, &netlock);
   }
 
   struct packets_queue *pq = remove_packet_from_queue(bp);
+  release(&netlock); // 释放锁，减少锁持有时间
+
   char *buf = pq->buf;
-  struct ip *ip = (struct ip *) (buf + sizeof(struct eth));
-  struct udp *udp = (struct udp *) (ip + 1);
+  struct ip *ip = (struct ip *)(buf + sizeof(struct eth));
+  struct udp *udp = (struct udp *)(ip + 1);
   uint32 ip_src = ntohl(ip->ip_src);
   uint16 udp_sport = ntohs(udp->sport);
-  int len = ntohs(udp->ulen);
+  int udp_len = ntohs(udp->ulen) - sizeof(struct udp); // 实际数据长度
 
-  if(copyout(p->pagetable, src, (char *)&ip_src, sizeof(ip->ip_src)) < 0){
-    kfree(buf);
-    kfree(pq);
-    release(&netlock);
-    printf("recv: copyout failed\n");
-    return -1;
+  // 错误处理路径：确保成对释放
+  int ret = -1;
+  if(copyout(p->pagetable, src, (char *)&ip_src, sizeof(ip_src)) >= 0 &&
+     copyout(p->pagetable, sport, (char *)&udp_sport, sizeof(udp_sport)) >= 0){
+     
+     int bytes_to_copy = (maxlen < udp_len) ? maxlen : udp_len;
+     if(bytes_to_copy < 0) bytes_to_copy = 0; // 防止负长度
+
+     if(copyout(p->pagetable, bufaddr, (char *)(udp + 1), bytes_to_copy) >= 0){
+        ret = bytes_to_copy;
+     }
   }
 
-  if(copyout(p->pagetable, sport, (char *)&udp_sport, sizeof(udp->sport)) < 0){
-    kfree(buf);
-    kfree(pq);
-    release(&netlock);
-    printf("recv: copyout failed\n");
-    return -1;
-  }
-
-  if(maxlen > len - 8)
-    maxlen = len - 8;
-  if(copyout(p->pagetable, bufaddr, (char *)(udp + 1), maxlen) < 0){
-    kfree(buf);
-    kfree(pq);
-    release(&netlock);
-    printf("recv: copyout failed\n");
-    return -1;
-  }
   kfree(buf);
   kfree(pq);
-  release(&netlock);
-  return maxlen;
+  return ret;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents

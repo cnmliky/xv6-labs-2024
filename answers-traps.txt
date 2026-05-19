@@ -1,0 +1,15 @@
+The trap mechanism in xv6 is essential for handling system calls, interrupts, and exceptions. 
+When a trap occurs, the hardware (or software trampoline) saves the current execution state 
+in the trapframe, including all registers. This allows the kernel to execute its trap 
+handler and subsequently restore the exact state of the user process to resume execution.
+
+Specifically, for the backtrace lab, we traverse the stack by following the saved frame 
+pointers (fp). Each stack frame in xv6 contains the return address and the previous frame 
+pointer, allowing us to walk up the stack until we reach the guard page or the base of 
+the stack.
+
+For the alarm lab, we manipulate the trapframe's epc (program counter) to redirect 
+execution to the user-provided handler. By saving the trapframe, we ensure that 
+after the handler finishes (via sigreturn), the process can seamlessly return to 
+its previous execution point without data loss or corruption.
+
